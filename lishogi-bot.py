@@ -1,11 +1,9 @@
 import argparse
-import chess
-from chess.variant import find_variant
-import chess.polyglot
+import shogi
 import engine_wrapper
 import model
 import json
-import lichess
+import lishogi
 import logging
 import multiprocessing
 import traceback
@@ -21,6 +19,8 @@ from functools import partial
 from requests.exceptions import ChunkedEncodingError, ConnectionError, HTTPError, ReadTimeout
 from urllib3.exceptions import ProtocolError
 from ColorLogger import enable_color_logging
+from util import *
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +142,8 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
     logger.info("+++ {}".format(game))
 
     engine_cfg = config["engine"]
-    is_uci = engine_cfg["protocol"] == "uci"
-    is_uci_ponder = is_uci and engine_cfg.get("uci_ponder", False)
+    is_usi = engine_cfg["protocol"] == "usi"
+    is_usi_ponder = is_usi and engine_cfg.get("ponder", False)
     move_overhead = config.get("move_overhead", 1000)
     polyglot_cfg = engine_cfg.get("polyglot", {})
     book_cfg = polyglot_cfg.get("book", {})
@@ -151,7 +151,7 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
     ponder_thread = None
     deferredFirstMove = False
 
-    ponder_uci = None
+    ponder_usi = None
     def ponder_thread_func(game, engine, board, wtime, btime, winc, binc):
         global ponder_results        
         best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, winc, binc, True)
@@ -162,9 +162,8 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
     if len(board.move_stack) < 2:
         while not terminated:
             try:
-                if not polyglot_cfg.get("enabled") or not play_first_book_move(game, engine, board, li, book_cfg):
-                    if not play_first_move(game, engine, board, li):
-                        deferredFirstMove = True
+                if not play_first_move(game, engine, board, li):
+                    deferredFirstMove = True
                 break
             except (HTTPError) as exception:
                 if exception.response.status_code == 400: # fallthrough
@@ -172,29 +171,23 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
     else:
         moves = game.state["moves"].split()
         if not is_game_over(game) and is_engine_move(game, moves):
-            book_move = None
             best_move = None
             ponder_move = None
             wtime = game.state["wtime"]
             btime = game.state["btime"]
-            if board.turn == chess.WHITE:
+            if board.turn == shogi.BLACK:
                 wtime = max(0, wtime - move_overhead)
             else:
                 btime = max(0, btime - move_overhead)
-            if polyglot_cfg.get("enabled") and len(moves) <= polyglot_cfg.get("max_depth", 8) * 2 - 1:
-                book_move = get_book_move(board, book_cfg)
-            if book_move == None:
-                logger.info("Searching for wtime {} btime {}".format(wtime, btime))
-                best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, game.state["winc"], game.state["binc"])
-                engine.print_stats()
-            else:
-                best_move = book_move
+            logger.info("Searching for wtime {} btime {}".format(wtime, btime))
+            best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, game.state["winc"], game.state["binc"])
+            engine.print_stats()
 
-            if is_uci_ponder and not ( ponder_move is None ):
-                ponder_board = board.copy()
-                ponder_board.push(best_move)
-                ponder_board.push(ponder_move)
-                ponder_uci = ponder_move.uci()
+            if is_usi_ponder and not ( ponder_move is None ):
+                ponder_board = copy.deepcopy(board)
+                ponder_board.push(shogi.Move.from_usi(best_move))
+                ponder_board.push(shogi.Move.from_usi(ponder_move))
+                ponder_usi = ponder_move
                 logger.info("Pondering for wtime {} btime {}".format(wtime, btime))
                 ponder_thread = threading.Thread(target = ponder_thread_func, args = (game, engine, ponder_board, wtime, btime, game.state["winc"], game.state["binc"]))
                 ponder_thread.start()
@@ -221,59 +214,35 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
                         sleep = min(5, delay * accel)
                         time.sleep(sleep)
 
-                    book_move = None
                     best_move = None
                     ponder_move = None
-                    if not ( ponder_thread is None ):
-                        move_uci = moves[-1]
-                        if ponder_uci == move_uci:
-                            engine.engine.ponderhit()
-                            ponder_thread.join()
-                            ponder_thread = None
-                            best_move , ponder_move = ponder_results[game.id]
-                            engine.print_stats()
-                        else:
-                            engine.engine.stop()
-                            ponder_thread.join()
-                            ponder_thread = None
-                        ponder_uci = None
 
                     wtime = upd["wtime"]
                     btime = upd["btime"]
-                    if board.turn == chess.WHITE:
+                    if board.turn == shogi.BLACK:
                         wtime = max(0, wtime - move_overhead)
                     else:
                         btime = max(0, btime - move_overhead)
 
                     if not deferredFirstMove:
-                        if polyglot_cfg.get("enabled") and len(moves) <= polyglot_cfg.get("max_depth", 8) * 2 - 1:
-                            book_move = get_book_move(board, book_cfg)
                         if best_move == None:
-                            if book_move == None:
-                                logger.info("Searching for wtime {} btime {}".format(wtime, btime))
-                                best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, upd["winc"], upd["binc"])
-                                engine.print_stats()
-                            else:
-                                best_move = book_move
-                        else:
-                            if not ( book_move == None ):
-                                best_move = book_move
-                                ponder_move = None
+                            logger.info("Searching for wtime {} btime {}".format(wtime, btime))
+                            best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, upd["winc"], upd["binc"])
+                            engine.print_stats()
 
-                        if is_uci_ponder and not ( ponder_move is None ):
-                            ponder_board = board.copy()
-                            ponder_board.push(best_move)
-                            ponder_board.push(ponder_move)
-                            ponder_uci = ponder_move.uci()
+                        if is_usi_ponder and not ( ponder_move is None ):
+                            ponder_board = copy.deepcopy(board)
+                            ponder_board.push(shogi.Move.from_usi(best_move))
+                            ponder_board.push(shogi.Move.from_usi(ponder_move))
+                            ponder_usi = ponder_move
                             logger.info("Pondering for wtime {} btime {}".format(wtime, btime))
                             ponder_thread = threading.Thread(target = ponder_thread_func, args = (game, engine, ponder_board, wtime, btime, upd["winc"], upd["binc"]))
                             ponder_thread.start()
                         li.make_move(game.id, best_move)
                     else:
-                        if not polyglot_cfg.get("enabled") or not play_first_book_move(game, engine, board, li, book_cfg):
-                            play_first_move(game, engine, board, li)
+                        play_first_move(game, engine, board, li)
                         deferredFirstMove = False
-                if board.turn == chess.WHITE:
+                if board.turn == shogi.BLACK:
                     game.ping(config.get("abort_time", 20), (upd["wtime"] + upd["winc"]) / 1000 + 60)
                 else:
                     game.ping(config.get("abort_time", 20), (upd["btime"] + upd["binc"]) / 1000 + 60)
@@ -300,8 +269,7 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
                 break
 
     logger.info("--- {} Game over".format(game.url()))
-    engine.engine.stop()
-    engine.quit()
+    engine.stop()
     if not ( ponder_thread is None ):
         ponder_thread.join()
         ponder_thread = None
@@ -315,7 +283,7 @@ def play_first_move(game, engine, board, li):
     moves = game.state["moves"].split()
     if is_engine_move(game, moves):
         # need to hardcode first movetime since Lichess has 30 sec limit.
-        best_move = engine.first_search(board, 10000)
+        best_move = engine.first_search(board, 1000)
         engine.print_stats()
         li.make_move(game.id, best_move)
         return True
@@ -323,53 +291,18 @@ def play_first_move(game, engine, board, li):
 
 
 def play_first_book_move(game, engine, board, li, config):
-    moves = game.state["moves"].split()
-    if is_engine_move(game, moves):
-        book_move = get_book_move(board, config)
-        if book_move:
-            li.make_move(game.id, book_move)
-            return True
-        else:
-            return play_first_move(game, engine, board, li)
-    return False
+    pass
 
 
 def get_book_move(board, config):
-    if board.uci_variant == "chess":
-        book = config["standard"]
-    else:
-        if config.get("{}".format(board.uci_variant)):
-            book = config["{}".format(board.uci_variant)]
-        else:
-            return None
-
-    with chess.polyglot.open_reader(book) as reader:
-        try:
-            selection = config.get("selection", "weighted_random")
-            if selection == "weighted_random":
-                move = reader.weighted_choice(board).move()
-            elif selection == "uniform_random":
-                move = reader.choice(board, minimum_weight=config.get("min_weight", 1)).move()
-            elif selection == "best_move":
-                move = reader.find(board, minimum_weight=config.get("min_weight", 1)).move()
-        except IndexError:
-            # python-chess raises "IndexError" if no entries found
-            move = None
-
-    if move is not None:
-        logger.info("Got move {} from book {}".format(move, book))
-
-    return move
+    pass
 
 
 def setup_board(game):
-    if game.variant_name.lower() == "chess960":
-        board = chess.Board(game.initial_fen, chess960=True)
-    elif game.variant_name == "From Position":
-        board = chess.Board(game.initial_fen)
+    if game.variant_name == "From Position":
+        board = shogi.Board(makesfendromfen(game.initial_fen))
     else:
-        VariantBoard = find_variant(game.variant_name)
-        board = VariantBoard()
+        board = shogi.Board() # Standard
     moves = game.state["moves"].split()
     for move in moves:
         board = update_board(board, move)
@@ -390,24 +323,24 @@ def is_game_over(game):
 
 
 def update_board(board, move):
-    uci_move = chess.Move.from_uci(move)
-    if board.is_legal(uci_move):
-        board.push(uci_move)
+    usi_move = shogi.Move.from_usi(makeusi(move))
+    if board.is_legal(usi_move):
+        board.push(usi_move)
     else:
-        logger.debug('Ignoring illegal move {} on board {}'.format(move, board.fen()))
+        logger.debug('Ignoring illegal move {} on board {}'.format(makeusi(move), board.sfen()))
     return board
 
 def intro():
     return r"""
     .   _/|
     .  // o\
-    .  || ._)  lichess-bot %s
+    .  || ._)  lishogi-bot %s
     .  //__\
-    .  )___(   Play on Lichess with a bot
+    .  )___(   Play on Lishogi with a bot
     """ % __version__
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Play on Lichess with a bot')
+    parser = argparse.ArgumentParser(description='Play on Lishogi with a bot')
     parser.add_argument('-u', action='store_true', help='Add this flag to upgrade your account to a bot account.')
     parser.add_argument('-v', action='store_true', help='Verbose output. Changes log level from INFO to DEBUG.')
     parser.add_argument('--config', help='Specify a configuration file (defaults to ./config.yml)')
@@ -419,7 +352,7 @@ if __name__ == "__main__":
     enable_color_logging(debug_lvl=logging.DEBUG if args.v else logging.INFO)
     logger.info(intro())
     CONFIG = load_config(args.config or "./config.yml")
-    li = lichess.Lichess(CONFIG["token"], CONFIG["url"], __version__)
+    li = lishogi.Lishogi(CONFIG["token"], CONFIG["url"], __version__)
 
     user_profile = li.get_profile()
     username = user_profile["username"]

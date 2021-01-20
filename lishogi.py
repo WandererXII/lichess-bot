@@ -2,6 +2,7 @@ import requests
 from urllib.parse import urljoin
 from requests.exceptions import ConnectionError, HTTPError, ReadTimeout
 from urllib3.exceptions import ProtocolError
+from util import makeuci
 
 try:
     from http.client import RemoteDisconnected
@@ -27,7 +28,7 @@ ENDPOINTS = {
 }
 
 # docs: https://lichess.org/api
-class Lichess():
+class Lishogi():
 
     def __init__(self, token, url, version):
         self.version = version
@@ -71,7 +72,7 @@ class Lichess():
         return self.api_post(ENDPOINTS["upgrade"])
 
     def make_move(self, game_id, move):
-        return self.api_post(ENDPOINTS["move"].format(game_id, move))
+        return self.api_post(ENDPOINTS["move"].format(game_id, makeuci(move)))
 
     def chat(self, game_id, room, text):
         payload = {'room': room, 'text': text}

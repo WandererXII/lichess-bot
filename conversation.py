@@ -23,12 +23,12 @@ class Conversation():
             game.ping(60, 120)
             self.send_reply(line, "Waiting 60 seconds...")
         elif cmd == "name":
-            self.send_reply(line, "{} (lichess-bot v{})".format(self.engine.name(), self.version))
+            self.send_reply(line, "{} (lishogi-bot v{})".format(self.engine.name(), self.version))
         elif cmd == "howto":
             self.send_reply(line, "How to run your own bot: lichess.org/api#tag/Chess-Bot")
         elif cmd == "eval" and line.room == "spectator":
             stats = self.engine.get_stats()
-            self.send_reply(line, ", ".join(stats))
+            self.send_reply("Sorry, not supported yet.")
         elif cmd == "eval":
             self.send_reply(line, "I don't tell that to my opponent, sorry.")
         elif cmd == "queue":

@@ -10,6 +10,7 @@ class Challenge():
         self.perf_name = c_info["perf"]["name"]
         self.speed = c_info["speed"]
         self.increment = c_info.get("timeControl", {}).get("increment", -1)
+        self.byoyomi = c_info.get("timeControl", {}).get("byoyomi", 0)
         self.challenger = c_info.get("challenger")
         self.challenger_title = self.challenger.get("title") if self.challenger else None
         self.challenger_is_bot = self.challenger_title == "BOT"
