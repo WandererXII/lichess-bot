@@ -73,8 +73,8 @@ class USIEngine(EngineWrapper):
         self.engine.usi()
 
         if options:
-            for name, value in self.stockfish_info["options"].items():
-                setoption(self.stockfish, name, value)
+            for name, value in options["options"].items():
+                self.engine.setoption(name, value)
 
     def first_search(self, board, movetime):
         best_move, _ = self.engine.go(board.sfen(), "", movetime=movetime)

@@ -300,7 +300,7 @@ def get_book_move(board, config):
 
 def setup_board(game):
     if game.variant_name == "From Position":
-        board = shogi.Board(makesfendromfen(game.initial_fen))
+        board = shogi.Board(makesfenfromfen(game.initial_fen))
     else:
         board = shogi.Board() # Standard
     moves = game.state["moves"].split()
