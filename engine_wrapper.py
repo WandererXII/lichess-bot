@@ -33,7 +33,7 @@ class EngineWrapper:
     def first_search(self, board, movetime):
         pass
 
-    def search(self, board, wtime, btime, winc, binc):
+    def search(self, board, btime, wtime, binc, winc):
         pass
 
     def print_stats(self):
@@ -80,29 +80,29 @@ class USIEngine(EngineWrapper):
         best_move, _ = self.engine.go(board.sfen(), "", movetime=movetime)
         return best_move
 
-    def search_with_ponder(self, board, wtime, btime, winc, binc, ponder=False):
+    def search_with_ponder(self, board, btime, wtime, binc, winc, ponder=False):
         moves = [m.usi() for m in list(board.move_stack)]
         best_move, ponder_move = self.engine.go(
             board.sfen(),
             moves,
-            wtime=wtime,
             btime=btime,
-            winc=winc,
+            wtime=wtime,
             binc=binc,
+            winc=winc,
             #ponder=ponder
         )
         return (best_move, ponder_move)
 
-    def search(self, board, wtime, btime, winc, binc):
+    def search(self, board, btime, wtime, binc, winc):
         cmds = self.go_commands
         moves = [m.usi() for m in list(board.move_stack)]
         best_move, _ = self.engine.go(
             board.sfen(),
             moves,
-            wtime=wtime,
             btime=btime,
-            winc=winc,
+            wtime=wtime,
             binc=binc,
+            winc=winc,
             depth=cmds.get("depth"),
             nodes=cmds.get("nodes"),
             movetime=cmds.get("movetime")

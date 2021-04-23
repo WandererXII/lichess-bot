@@ -152,9 +152,9 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
     deferredFirstMove = False
 
     ponder_usi = None
-    def ponder_thread_func(game, engine, board, wtime, btime, winc, binc):
+    def ponder_thread_func(game, engine, board, btime, wtime, binc, winc):
         global ponder_results        
-        best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, winc, binc, True)
+        best_move , ponder_move = engine.search_with_ponder(board, btime, wtime, binc, winc, True)
         ponder_results[game.id] = ( best_move , ponder_move )
 
     engine.set_time_control(game)
@@ -173,14 +173,14 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
         if not is_game_over(game) and is_engine_move(game, moves):
             best_move = None
             ponder_move = None
-            wtime = game.state["wtime"]
             btime = game.state["btime"]
+            wtime = game.state["wtime"]
             if board.turn == shogi.BLACK:
-                wtime = max(0, wtime - move_overhead)
-            else:
                 btime = max(0, btime - move_overhead)
+            else:
+                wtime = max(0, wtime - move_overhead)
             logger.info("Searching for wtime {} btime {}".format(wtime, btime))
-            best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, game.state["winc"], game.state["binc"])
+            best_move , ponder_move = engine.search_with_ponder(board, btime, wtime, game.state["binc"], game.state["winc"])
             engine.print_stats()
 
             if is_usi_ponder and not ( ponder_move is None ):
@@ -188,8 +188,8 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
                 ponder_board.push(shogi.Move.from_usi(best_move))
                 ponder_board.push(shogi.Move.from_usi(ponder_move))
                 ponder_usi = ponder_move
-                logger.info("Pondering for wtime {} btime {}".format(wtime, btime))
-                ponder_thread = threading.Thread(target = ponder_thread_func, args = (game, engine, ponder_board, wtime, btime, game.state["winc"], game.state["binc"]))
+                logger.info("Pondering for btime {} wtime {}".format(btime, wtime))
+                ponder_thread = threading.Thread(target = ponder_thread_func, args = (game, engine, ponder_board, btime, wtime, game.state["binc"], game.state["winc"]))
                 ponder_thread.start()
             li.make_move(game.id, best_move)
 
@@ -217,17 +217,17 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
                     best_move = None
                     ponder_move = None
 
-                    wtime = upd["wtime"]
                     btime = upd["btime"]
+                    wtime = upd["wtime"]
                     if board.turn == shogi.BLACK:
-                        wtime = max(0, wtime - move_overhead)
-                    else:
                         btime = max(0, btime - move_overhead)
+                    else:
+                        wtime = max(0, wtime - move_overhead)
 
                     if not deferredFirstMove:
                         if best_move == None:
-                            logger.info("Searching for wtime {} btime {}".format(wtime, btime))
-                            best_move , ponder_move = engine.search_with_ponder(board, wtime, btime, upd["winc"], upd["binc"])
+                            logger.info("Searching for btime {} wtime {}".format(btime, wtime))
+                            best_move , ponder_move = engine.search_with_ponder(board, btime, wtime, upd["binc"], upd["winc"])
                             engine.print_stats()
 
                         if is_usi_ponder and not ( ponder_move is None ):
@@ -235,7 +235,7 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
                             ponder_board.push(shogi.Move.from_usi(best_move))
                             ponder_board.push(shogi.Move.from_usi(ponder_move))
                             ponder_usi = ponder_move
-                            logger.info("Pondering for wtime {} btime {}".format(wtime, btime))
+                            logger.info("Pondering for btime {} wtime {}".format(btime, wtime))
                             ponder_thread = threading.Thread(target = ponder_thread_func, args = (game, engine, ponder_board, wtime, btime, upd["winc"], upd["binc"]))
                             ponder_thread.start()
                         li.make_move(game.id, best_move)
@@ -243,9 +243,9 @@ def play_game(li, game_id, control_queue, engine_factory, user_profile, config, 
                         play_first_move(game, engine, board, li)
                         deferredFirstMove = False
                 if board.turn == shogi.BLACK:
-                    game.ping(config.get("abort_time", 20), (upd["wtime"] + upd["winc"]) / 1000 + 60)
-                else:
                     game.ping(config.get("abort_time", 20), (upd["btime"] + upd["binc"]) / 1000 + 60)
+                else:
+                    game.ping(config.get("abort_time", 20), (upd["wtime"] + upd["winc"]) / 1000 + 60)
             elif u_type == "ping":
                 if game.should_abort_now():
                     logger.info("    Aborting {} by lack of activity".format(game.url()))
@@ -300,7 +300,7 @@ def get_book_move(board, config):
 
 def setup_board(game):
     if game.variant_name == "From Position":
-        board = shogi.Board(makesfenfromfen(game.initial_fen))
+        board = shogi.Board(game.initial_fen)
     else:
         board = shogi.Board() # Standard
     moves = game.state["moves"].split()
@@ -310,12 +310,12 @@ def setup_board(game):
     return board
 
 
-def is_white_to_move(game, moves):
-    return len(moves) % 2 == (0 if game.white_starts else 1)
+def is_sente_to_move(game, moves):
+    return len(moves) % 2 == (0 if game.sente_starts else 1)
 
 
 def is_engine_move(game, moves):
-    return game.is_white == is_white_to_move(game, moves)
+    return game.is_sente == is_sente_to_move(game, moves)
 
 
 def is_game_over(game):
